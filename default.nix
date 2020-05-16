@@ -1,16 +1,13 @@
 let
   haskellNix = import (builtins.fetchTarball
-    "https://github.com/input-output-hk/haskell.nix/archive/788e1983768cd810d94e77f4032288fb26e486d4.tar.gz")
+    "https://github.com/input-output-hk/haskell.nix/archive/3c54d5781cc2d165d948114f0479d58cf1c74f07.tar.gz")
     { };
-  # haskell.nix provides access to the nixpkgs pins which are used by our CI, hence
-  # you will be more likely to get cache hits when using these.
-  # But you can also just use your own, e.g. '<nixpkgs>'
-  nixpkgsSrc = haskellNix.sources.nixpkgs-1909;
-  # haskell.nix provides some arguments to be passed to nixpkgs, including some patches
-  # and also the haskell.nix functionality itself as an overlay.
+  nixpkgsSrc = haskellNix.sources.nixpkgs-default;
   nixpkgsArgs = haskellNix.nixpkgsArgs;
-in { pkgs ? import nixpkgsSrc nixpkgsArgs }:
-let
+
+  pkgs = import nixpkgsSrc nixpkgsArgs;
+  pkgsMusl = pkgs.pkgsCross.musl64;
+
   modules = haskellPackages: [
     { reinstallableLibGhc = true; }
     { packages.ghc.patches = [ ./ghc.patch ]; }
@@ -24,8 +21,6 @@ let
         [ "echo" ];
     }
   ];
-  staticCrossPkgs =
-    if pkgs.stdenv.hostPlatform.isLinux then pkgs.pkgsCross.musl64 else pkgs;
 in {
   default = with pkgs;
     haskell-nix.stackProject {
@@ -35,7 +30,7 @@ in {
       };
       modules = modules haskell-nix.haskellPackages;
     };
-  static = with staticCrossPkgs;
+  static = with pkgsMusl;
     let
       libffi-static = libffi.overrideAttrs (oldAttrs: {
         dontDisableStatic = true;
@@ -49,13 +44,20 @@ in {
       };
       modules = (modules haskell-nix.haskellPackages) ++ [
         { doHaddock = false; }
-        {
+        ({ pkgs, ... }: {
           ghc.package =
-            buildPackages.pkgs.haskell-nix.compiler.ghc883.override {
+            pkgs.buildPackages.haskell-nix.compiler.ghc883.override {
               enableIntegerSimple = true;
               enableShared = true;
+              extra-passthru = {
+                buildGHC =
+                  pkgs.buildPackages.haskell-nix.compiler.ghc883.override {
+                    enableIntegerSimple = true;
+                    enableShared = true;
+                  };
+              };
             };
-        }
+        })
         { packages.ghc.flags.terminfo = false; }
         { packages.bytestring.flags.integer-simple = true; }
         { packages.text.flags.integer-simple = true; }
